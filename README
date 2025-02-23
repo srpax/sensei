@@ -1,1 +1,1 @@
-Simple CLI for configuring ninja files for your project.
+Generates ninja targets from source tree

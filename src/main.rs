@@ -1,11 +1,11 @@
 use anyhow::Result;
-use env_logger;
+use clap::Parser;
+use clap_verbosity_flag;
 use log::info;
 
-// Command Line Arguments
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-pub struct Args {
+struct Args {
     /// Append output to an existing output file, if it exists.
     #[arg(short, long)]
     append: bool,
@@ -30,23 +30,32 @@ pub struct Args {
     #[arg(short, long)]
     surpress: bool,
 
-    /// nipples
     #[command(flatten)]
-    verbose: Verbosity,
+    verbose: clap_verbosity_flag::Verbosity,
 
     /// One or more source files or directories.
-    source: Vec<std::path::PathBuf>,
+    sources: Vec<std::path::PathBuf>,
 }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let args: Args = Args::parse();
+
     env_logger::Builder::new()
         .filter_level(args.verbose.log_level_filter())
         .init();
-    info!("Sources:");
-    for path in args.source {
+
+    info!("Output: {}", args.output.display());
+
+    info!("Input Sources:");
+    for path in &args.sources {
         info!("  {}", path.display());
     }
-    info!("Output: {:?}", args.output);
+
+    info!("Expanded Sources:");
+    let expanded_paths = ningen::expand_paths(&args.sources, args.maxdepth)?;
+    for expanded_path in expanded_paths {
+        info!("  {}", expanded_path.display());
+    }
+
     return Ok(());
 }

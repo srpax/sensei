@@ -10,7 +10,7 @@ fn input_source_not_found() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::path::PathBuf::from("this/is/not/a/path");
     let mut cmd = Command::cargo_bin(APP_NAME)?;
     assert!(!path.exists());
-    cmd.arg(path);
+    cmd.arg(path).arg("-vv");
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("does not exist"));

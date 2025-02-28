@@ -1,75 +1,85 @@
 use anyhow::{Context, Result};
-use clap::Parser;
-use clap_verbosity_flag::Verbosity;
 use colored::Colorize; // for log messages
-use log::{info, warn};
+use log::{error, info, warn};
 use std::collections::linked_list::LinkedList;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-struct ExpandArgs {
-    depth: usize,
+/// Arguments specifically used for expanding source path.
+pub struct PathExpander {
+    /// The current recursive depth.
+    pub depth: usize,
+
+    /// The maximum recursion depth.
     max_depth: usize,
 }
 
-fn expand_path(dir: &Path, args: &ExpandArgs) -> Result<LinkedList<PathBuf>> {
-    let mut expanded = LinkedList::new();
-    if dir.is_dir() {
-        // iterate through directory entries
-        for result in fs::read_dir(dir)? {
-            let dir = result?;
-            let path = dir.path();
-            if path.is_dir() {
-                // path is to a directory
-                if depth < MAX_DEPTH {
-                    // recursively expand this directory
-                    let opt_new_depth: Option<usize> = Some(depth + 1);
-                    expanded.append(&mut expand_path(path.as_path(), opt_new_depth)?);
-                } else {
-                    // max recursion depth hit, warn and do nothing with this directory
-                    warn!(
-                        "{:width$}{}",
-                        "",
-                        path.to_str()
-                            .context("Cannot display valid UTF-8 path")?
-                            .strikethrough()
-                            .bold()
-                            .yellow(),
-                        width = (depth * 2)
-                    );
+impl PathExpander {
+    /// Create new arguments with the specified max recursion depth
+    pub fn new(max_depth: usize) -> Self {
+        Self {
+            depth: 0,
+            max_depth,
+        }
+    }
+
+    // Expand a path recursively
+    pub fn expand(&mut self, path: PathBuf) -> Result<LinkedList<PathBuf>> {
+        let mut expanded_paths = LinkedList::new();
+        let path_str = format!("{}", path.display());
+        if self.depth > self.max_depth {
+            // log ignored path
+            warn!(
+                "{:width$}{}",
+                "",
+                path_str.strikethrough().yellow(),
+                width = (self.depth * 2)
+            );
+        } else if !path.exists() {
+            // log missing path
+            error!(
+                "{:width$}{}",
+                "",
+                path_str.strikethrough().bold().red(),
+                width = (self.depth * 2)
+            )
+        } else {
+            // log existing path!
+            info!(
+                "{:width$}{}",
+                "",
+                path_str.green(),
+                width = (self.depth * 2)
+            );
+            if path.is_file() {
+                // path is a file
+                expanded_paths.push_back(path);
+            } else if path.is_dir() {
+                // path is a directory
+                self.depth += 1;
+                for subpath in fs::read_dir(path)? {
+                    // recursively expand this path
+                    expanded_paths.append(&mut self.expand(subpath?.path())?);
                 }
-            } else if path.is_file() {
-                // path is to a file
-                info!(
-                    "{:width$}{}",
-                    "",
-                    path.to_str().unwrap_or("?").bold().green(),
-                    width = (depth * 2)
-                );
-                expanded.push_back(path);
             } else {
-                // path is not to a directory or file?
+                // path is unknown filesystem object
                 warn!(
                     "{:width$}{}",
                     "",
-                    path.to_str().unwrap_or("?").bold().red(),
-                    width = (depth * 2)
+                    path_str.strikethrough().italic().blue(),
+                    width = (self.depth * 2)
                 );
             }
         }
+        return Ok(expanded_paths);
     }
-    return Ok(expanded);
 }
 
-/// Expand a vector of paths to a linked list of file paths
-/// TODO: add rules
-pub fn expand_sources(
-    source: &Vec<std::path::PathBuf>,
-    args: &Args,
-) -> Result<LinkedList<std::path::PathBuf>> {
-    let mut expanded = LinkedList::new();
-    for path in source {
-        expanded.append(&mut expand_path(path.as_path(), None)?);
+/// Expand multiple paths as needed.
+pub fn expand_paths(paths: &Vec<PathBuf>, max_depth: usize) -> Result<LinkedList<PathBuf>> {
+    let mut expanded_paths = LinkedList::new();
+    for path in paths {
+        expanded_paths.append(&mut PathExpander::new(max_depth).expand(path.clone())?);
     }
-    return Ok(expanded);
+    return Ok(expanded_paths);
 }

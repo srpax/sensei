@@ -1,5 +1,5 @@
 [package]
-name = "ningen"
+name = "sensei"
 version = "0.1.0"
 edition = "2021"
 description = "Generates ninja targets from source tree"

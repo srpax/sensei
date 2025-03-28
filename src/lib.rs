@@ -1,86 +1,79 @@
 use anyhow::{anyhow, bail, Result};
 use colored::Colorize; // for log messages
 use log::{error, info, warn};
-use std::collections::linked_list::LinkedList;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-// LinkedList of PathBuf type for conveinence
-type PathList = LinkedList<PathBuf>;
+// convenience "macro"
+pub const BLD_TAG: &str = "builld";
+pub const CC_TAG: &str = "cc";
 
 // Extension pair vector. Used to apply a target extension based on source extension.
-type ExtMap = Vec<(Option<OsString>, Option<OsString>)>;
+pub type ExtMap = Vec<(Option<OsString>, Option<OsString>)>;
 
-// conveinence "macro"
-pub const APP_NAME: &str = "sensei";
-const BLD_TAG: &str = "builld";
-const CC_TAG: &str = "cc";
-
-/// Expand multiple paths recursively, each with the specified maximum depth (similar to tree -L).
-pub fn expand_paths(paths: &Vec<PathBuf>, max_depth: usize) -> Result<PathList> {
-    let mut expanded_paths: PathList = PathList::new();
-    for path in paths {
-        expanded_paths.append(&mut expand_path(path, max_depth, 0)?);
-    }
-    return Ok(expanded_paths);
-}
-
-/// Expand a single path recursively with the specified maximum depth and starting depth.
-pub fn expand_path(path: &Path, max_depth: usize, starting_depth: usize) -> Result<PathList> {
-    let mut expanded_paths: PathList = PathList::new();
-    let path_str = format!("{}", path.display());
-    if starting_depth > max_depth {
-        // log ignored path
-        warn!(
-            "{:width$}{}",
-            "",
-            path_str.strikethrough().yellow(),
-            width = starting_depth * 2
-        );
+fn _expand_path(
+    path: &Path,
+    cur_depth: usize,
+    max_depth: usize,
+    init_count: usize,
+    max_count: usize,
+) -> Result<Vec<PathBuf>> {
+    let mut expanded_paths: Vec<PathBuf> = Vec::with_capacity(init_count);
+    let width = cur_depth * 2;
+    let path_str = match path.to_str() {
+        Some(str) => str,
+        None => {
+            warn!("{:>width$}", path.display());
+            bail!("Invalid unicode while expanding path!");
+        }
+    };
+    if cur_depth > max_depth {
+        // ignored path
+        warn!("{:>width$}", path_str.strikethrough().yellow());
     } else if !path.exists() {
-        // log missing path
-        error!(
-            "{:width$}{}",
-            "",
-            path_str.strikethrough().bold().red(),
-            width = starting_depth * 2
-        );
-        bail!("Specified path does not exist.");
+        // missing path
+        error!("{:>width$}", path_str.strikethrough().bold().red());
+        bail!("Specified path does not exist!");
     } else {
-        // log existing path!
-        info!(
-            "{:width$}{}",
-            "",
-            path_str.green(),
-            width = starting_depth * 2
-        );
+        // existing path!
+        info!("{:>width$}", path_str.green());
         if path.is_file() {
             // path is a file
-            expanded_paths.push_back(PathBuf::from(path));
+            expanded_paths.push(PathBuf::from(path));
         } else if path.is_dir() {
             // path is a directory
             for entry in std::fs::read_dir(path)? {
                 // recursively expand this path
                 let subpath = entry?.path();
-                expanded_paths.append(&mut expand_path(
+                let mut expanded_subpaths = _expand_path(
                     subpath.as_path(),
+                    cur_depth + 1,
                     max_depth,
-                    starting_depth + 1,
-                )?);
+                    init_count,
+                    max_count,
+                )?;
+                if (expanded_paths.len() + expanded_subpaths.len()) > max_count {
+                    bail!("Maximum path count reached!");
+                }
+                expanded_paths.append(&mut expanded_subpaths);
             }
         } else {
             // path is unknown filesystem object
-            warn!(
-                "{:width$}{}",
-                "",
-                path_str.strikethrough().italic().bright_blue(),
-                width = starting_depth * 2
-            );
+            warn!("{:width$}", path_str.strikethrough().italic().bright_blue());
         }
     }
     return Ok(expanded_paths);
+}
+/// Expand a single path recursively with the specified maximum depth and starting depth.
+pub fn expand_path(
+    path: &Path,
+    max_depth: usize,
+    init_count: usize,
+    max_count: usize,
+) -> Result<Vec<PathBuf>> {
+    return _expand_path(path, 0, max_depth, init_count, max_count);
 }
 
 // Get the target name for the given source file.
@@ -109,14 +102,18 @@ fn get_target(source: &Path, extmap: &ExtMap) -> Result<OsString> {
 /// Create a ninja file at the specified output location using the specified sources.
 /// This file contains the "individual" targets for each source file, as well as a "main" target all "individual" targets are needed to build.
 /// The specified extension map is used to create target extensions from source extensions
-pub fn make_target_file(output_path: &Path, source_paths: &PathList, exts: &ExtMap) -> Result<()> {
+pub fn make_target_file(
+    output_path: &Path,
+    source_paths: &Vec<PathBuf>,
+    exts: &ExtMap,
+) -> Result<()> {
     // create and truncate output file
     let mut output_file = File::create(output_path)?;
 
     // write banner
     writeln!(
         &mut output_file,
-        "### GENERATED BY {APP_NAME} DO NOT MODIFY ###\n",
+        "### GENERATED BY sensei DO NOT MODIFY ###\n",
     )?;
 
     // write build targets

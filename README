@@ -1,1 +1,10 @@
-Generates ninja targets from source tree
+Generates ninja targets from C/C++ sources.
+
+Purpose:
+A small application used in conjuction with manually written ninja files.
+Usually, this system requires only one additional ninja file.
+
+Goals:
+- replace more complex build systems (i.e. that generate ninja files)
+- scalable
+- integratable

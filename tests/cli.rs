@@ -1,91 +1,182 @@
-use assert_cmd::Command; // Add methods on commands
-use assert_fs::prelude::*;
-use predicates::prelude::*; // Used for writing assertions
+use anyhow::Result;
+use assert_fs::{prelude::FileTouch, NamedTempFile};
 
-const APP_NAME: &str = "ningen";
-
-/// ensure a nonexistant path is detected
+/// Ensure no source is accepted (in tty, would wait for input)
 #[test]
-fn input_source_not_found() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::path::PathBuf::from("this/is/not/a/path");
-    let mut cmd = Command::cargo_bin(APP_NAME)?;
-    assert!(!path.exists());
-    cmd.arg(path).arg("-vv");
+fn source_none() -> Result<()> {
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.assert().success();
+    return Ok(());
+}
+
+/// Ensure a single source via CLI is accepted.
+#[test]
+fn source_cli_single() -> Result<()> {
+    let path = "this/is/test.c";
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg(path);
+
     cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("does not exist"));
-    return Ok(());
-}
-
-/// ensure a single source file is detected
-#[test]
-fn input_single_source_file() -> Result<(), Box<dyn std::error::Error>> {
-    let file = assert_fs::NamedTempFile::new("foo")?;
-    let mut cmd = Command::cargo_bin(APP_NAME)?;
-
-    // flush the file
-    file.write_str("\n")?; // flush?
-    cmd.arg(file.path());
-    cmd.assert().success();
+        .success()
+        .stdout(format!("build test: cc {path}\n"));
 
     return Ok(());
 }
 
-/// Ensure multiple source files are detected
+// Ensure a single source via stdin is accepted.
 #[test]
-fn input_multiple_source_file() -> Result<(), Box<dyn std::error::Error>> {
-    let file1 = assert_fs::NamedTempFile::new("foo")?;
-    let file2 = assert_fs::NamedTempFile::new("bar")?;
-    let mut cmd = Command::cargo_bin(APP_NAME)?;
+fn source_stdin_single() -> Result<()> {
+    let path = "this/is/test.c";
 
-    // flush files
-    file1.write_str("\n")?;
-    file2.write_str("\n")?;
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.write_stdin(path.as_bytes());
 
-    cmd.arg(file1.path()).arg(file2.path());
-    cmd.assert().success();
+    cmd.assert()
+        .success()
+        .stdout(format!("build test: cc {path}\n"));
 
     return Ok(());
 }
 
-/// Ensure a single directory is detected correctly
+/// Ensure multiple source files via CLI are accepted.
 #[test]
-fn input_single_source_dir() -> Result<(), Box<dyn std::error::Error>> {
-    let dir = assert_fs::TempDir::new()?;
-    let mut cmd = Command::cargo_bin(APP_NAME)?;
-    cmd.arg(dir.path());
-    cmd.assert().success();
+fn source_cli_multiple() -> Result<()> {
+    let path1 = "this/is/test1.c";
+    let path2 = "this/is/test2.c";
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg(path1).arg(path2);
+
+    cmd.assert().success().stdout(format!(
+        "build test1: cc {path1}\nbuild test2: cc {path2}\n"
+    ));
+
     return Ok(());
 }
 
-/// Ensure multiple directories are detected correctly
+/// Ensure multiple source files via stdin are accepted.
 #[test]
-fn input_multiple_source_dir() -> Result<(), Box<dyn std::error::Error>> {
-    let dir1 = assert_fs::TempDir::new()?;
-    let dir2 = assert_fs::TempDir::new()?;
-    let mut cmd = Command::cargo_bin(APP_NAME)?;
-    cmd.arg(dir1.path()).arg(dir2.path());
-    cmd.assert().success();
+fn source_stdin_multiple() -> Result<()> {
+    let path1 = "this/is/test1.c";
+    let path2 = "this/is/test2.c";
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.write_stdin([path1, path2].join("\n").as_bytes());
+
+    cmd.assert().success().stdout(format!(
+        "build test1: cc {path1}\nbuild test2: cc {path2}\n"
+    ));
+
     return Ok(());
 }
 
 #[test]
-fn input_various_sources() -> Result<(), Box<dyn std::error::Error>> {
-    let dir1 = assert_fs::TempDir::new()?;
-    let dir2 = assert_fs::TempDir::new()?;
-    let file1 = dir1.child("foo");
-    let file2 = dir2.child("bar");
+fn source_both_multiple() -> Result<()> {
+    let path1 = "this/is/test1.c";
+    let path2 = "this/is/test2.c";
 
-    let mut cmd = Command::cargo_bin(APP_NAME)?;
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg(path1).write_stdin(path2.as_bytes());
+    cmd.assert().success().stdout(format!(
+        "build test1: cc {path1}\nbuild test2: cc {path2}\n"
+    ));
 
-    // flush files
-    file1.write_str("\n")?;
-    file2.write_str("\n")?;
+    return Ok(());
+}
 
-    cmd.arg(file1.path())
-        .arg(file2.path())
-        .arg(dir1.path())
-        .arg(dir2.path());
+#[test]
+fn option_rule() -> Result<()> {
+    let path = "this/is/test.c";
+    let rule = "ld";
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg("--rule").arg(rule).arg(path);
+    cmd.assert()
+        .success()
+        .stdout(format!("build test: {rule} {path}\n"));
+
+    return Ok(());
+}
+
+#[test]
+fn option_master_target() -> Result<()> {
+    let path = "this/is/test.c";
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg("--master-target").arg("main").arg(path);
+    cmd.assert()
+        .success()
+        .stdout(format!("build test: cc {path}\nbuild main: cc test\n"));
+
+    return Ok(());
+}
+
+#[test]
+fn option_master_rule() -> Result<()> {
+    let path = "this/is/test.c";
+    let mtarget = "main";
+    let mrule = "ld";
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg("--master-target")
+        .arg(mtarget)
+        .arg("--master-rule")
+        .arg(mrule)
+        .arg(path);
+    cmd.assert().success().stdout(format!(
+        "build test: cc {path}\nbuild {mtarget}: {mrule} test\n"
+    ));
+
+    return Ok(());
+}
+
+#[test]
+fn option_output_file() -> Result<()> {
+    let path = "this/is/test.c";
+    let output_file = NamedTempFile::new("targets.ninja")?;
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg("--output").arg(output_file.path()).arg(path);
+
+    cmd.assert().success().stdout("");
+
+    let target = std::fs::read_to_string(output_file.path())?;
+    let target = target
+        .split("\n")
+        .nth(1)
+        .expect("file should have at least 2 lines (banner + target)");
+    assert_eq!(target, format!("build test: cc {path}"));
+
+    return Ok(());
+}
+
+#[test]
+fn error_output_exists() -> Result<()> {
+    let path = "this/is/test.c";
+    let output_file = NamedTempFile::new("targets.ninja")?;
+    output_file.touch()?;
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg("--output").arg(output_file.path()).arg(path);
+
+    cmd.assert().failure();
+
+    return Ok(());
+}
+
+#[test]
+fn option_force() -> Result<()> {
+    let path = "this/is/test.c";
+    let output_file = NamedTempFile::new("targets.ninja")?;
+    output_file.touch()?;
+
+    let mut cmd = assert_cmd::Command::cargo_bin("sensei")?;
+    cmd.arg("--output")
+        .arg(output_file.path())
+        .arg("--force")
+        .arg(path);
+
     cmd.assert().success();
 
     return Ok(());

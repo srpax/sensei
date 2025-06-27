@@ -1,6 +1,1 @@
-Create ninja targets from file paths.
-
-TODO:
-- target extension mapping (e.g. specify '.c' to '.o')
-- output relative paths (i.e. mutate source paths to be relative to output file)
-- canonicalize paths (don't need relative paths, but now system/user specific)
+Old repository for ninja-fmt, moved to https://gitea.com/srpax/ninja-fmt.
